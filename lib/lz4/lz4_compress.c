@@ -446,7 +446,7 @@ _last_literals:
 			*op++ = (BYTE)(lastRun << ML_BITS);
 		}
 
-		memcpy(op, anchor, lastRun);
+		LZ4_memcpy(op, anchor, lastRun);
 
 		op += lastRun;
 	}
@@ -767,7 +767,7 @@ EXPORT_SYMBOL(LZ4_compress_destSize);
 /*-******************************
  *	Streaming functions
  ********************************/
-void LZ4_resetStream(LZ4_stream_t *LZ4_stream)
+FORCE_INLINE void LZ4_resetStream(LZ4_stream_t *LZ4_stream)
 {
 	memset(LZ4_stream, 0, sizeof(LZ4_stream_t));
 }
