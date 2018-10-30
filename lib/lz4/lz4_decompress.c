@@ -141,6 +141,9 @@ static FORCE_INLINE int LZ4_decompress_generic(
 		 * space in the output for those 18 bytes earlier, upon
 		 * entering the shortcut (in other words, there is a
 		 * combined check for both stages).
+		 *
+		 * The & in the likely() below is intentionally not && so that
+		 * some compilers can produce better parallelized runtime code
 		 */
 		if ((endOnInput ? length != RUN_MASK : length <= 8)
 		   /*
@@ -150,7 +153,7 @@ static FORCE_INLINE int LZ4_decompress_generic(
 		   && likely((endOnInput ? ip < shortiend : 1) &
 			     (op <= shortoend))) {
 			/* Copy the literals */
-			memcpy(op, ip, endOnInput ? 16 : 8);
+			LZ4_memcpy(op, ip, endOnInput ? 16 : 8);
 			op += length; ip += length;
 
 			/*
@@ -169,9 +172,9 @@ static FORCE_INLINE int LZ4_decompress_generic(
 			    (offset >= 8) &&
 			    (dict == withPrefix64k || match >= lowPrefix)) {
 				/* Copy the match. */
-				memcpy(op + 0, match + 0, 8);
-				memcpy(op + 8, match + 8, 8);
-				memcpy(op + 16, match + 16, 2);
+				LZ4_memcpy(op + 0, match + 0, 8);
+				LZ4_memcpy(op + 8, match + 8, 8);
+				LZ4_memcpy(op + 16, match + 16, 2);
 				op += length + MINMATCH;
 				/* Both stages worked, load the next token. */
 				continue;
@@ -260,7 +263,11 @@ static FORCE_INLINE int LZ4_decompress_generic(
 				}
 			}
 
-			memcpy(op, ip, length);
+			/*
+			 * supports overlapping memory regions; only matters
+			 * for in-place decompression scenarios
+			 */
+			LZ4_memmove(op, ip, length);
 			ip += length;
 			op += length;
 
@@ -383,7 +390,7 @@ _copy_match:
 				while (op < copyEnd)
 					*op++ = *match++;
 			} else {
-				memcpy(op, match, mlen);
+				LZ4_memcpy(op, match, mlen);
 			}
 			op = copyEnd;
 			if (op == oend)
@@ -397,7 +404,7 @@ _copy_match:
 			op[2] = match[2];
 			op[3] = match[3];
 			match += inc32table[offset];
-			memcpy(op + 4, match, 4);
+			LZ4_memcpy(op + 4, match, 4);
 			match -= dec64table[offset];
 		} else {
 			LZ4_copy8(op, match);
@@ -455,7 +462,7 @@ int LZ4_decompress_safe(const char *source, char *dest,
 				      noDict, (BYTE *)dest, NULL, 0);
 }
 
-static int LZ4_decompress_safe_partial(const char *src, char *dst,
+int LZ4_decompress_safe_partial(const char *src, char *dst,
 	int compressedSize, int targetOutputSize, int dstCapacity)
 {
 	dstCapacity = min(targetOutputSize, dstCapacity);
@@ -550,7 +557,7 @@ int LZ4_decompress_fast_doubleDict(const char *source, char *dest,
 
 /* ===== streaming decompression functions ===== */
 
-static int LZ4_setStreamDecode(LZ4_streamDecode_t *LZ4_streamDecode,
+int LZ4_setStreamDecode(LZ4_streamDecode_t *LZ4_streamDecode,
 	const char *dictionary, int dictSize)
 {
 	LZ4_streamDecode_t_internal *lz4sd =
@@ -573,7 +580,7 @@ static int LZ4_setStreamDecode(LZ4_streamDecode_t *LZ4_streamDecode,
  * decoded data into a safe buffer,
  * and indicate where it stands using LZ4_setStreamDecode()
  */
-static int LZ4_decompress_safe_continue(LZ4_streamDecode_t *LZ4_streamDecode,
+int LZ4_decompress_safe_continue(LZ4_streamDecode_t *LZ4_streamDecode,
 	const char *source, char *dest, int compressedSize, int maxOutputSize)
 {
 	LZ4_streamDecode_t_internal *lz4sd =
@@ -626,7 +633,7 @@ static int LZ4_decompress_safe_continue(LZ4_streamDecode_t *LZ4_streamDecode,
 	return result;
 }
 
-static int LZ4_decompress_fast_continue(LZ4_streamDecode_t *LZ4_streamDecode,
+int LZ4_decompress_fast_continue(LZ4_streamDecode_t *LZ4_streamDecode,
 	const char *source, char *dest, int originalSize)
 {
 	LZ4_streamDecode_t_internal *lz4sd = &LZ4_streamDecode->internal_donotuse;
@@ -665,7 +672,7 @@ static int LZ4_decompress_fast_continue(LZ4_streamDecode_t *LZ4_streamDecode,
 	return result;
 }
 
-static int LZ4_decompress_safe_usingDict(const char *source, char *dest,
+int LZ4_decompress_safe_usingDict(const char *source, char *dest,
 				  int compressedSize, int maxOutputSize,
 				  const char *dictStart, int dictSize)
 {
@@ -683,7 +690,7 @@ static int LZ4_decompress_safe_usingDict(const char *source, char *dest,
 		compressedSize, maxOutputSize, dictStart, dictSize);
 }
 
-static int LZ4_decompress_fast_usingDict(const char *source, char *dest,
+int LZ4_decompress_fast_usingDict(const char *source, char *dest,
 				  int originalSize,
 				  const char *dictStart, int dictSize)
 {
