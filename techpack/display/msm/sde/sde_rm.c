@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
  */
 
 #define pr_fmt(fmt)	"[drm:%s] " fmt, __func__
@@ -968,7 +968,7 @@ static bool _sde_rm_check_lm_and_get_connected_blks(
 	is_conn_secondary = (reqs->hw_res.display_type ==
 				 SDE_CONNECTOR_SECONDARY) ? true : false;
 
-	SDE_DEBUG("check lm %d: dspp %d ds %d pp %d features %d disp type %d\n",
+	SDE_DEBUG("check lm %d: dspp %d ds %d pp %d features %ld disp type %d\n",
 		 lm_cfg->id, lm_cfg->dspp, lm_cfg->ds, lm_cfg->pingpong,
 		 lm_cfg->features, (int)reqs->hw_res.display_type);
 
@@ -1003,7 +1003,7 @@ static bool _sde_rm_check_lm_and_get_connected_blks(
 	} else if ((!is_conn_primary && lm_primary_pref) ||
 			(!is_conn_secondary && lm_secondary_pref)) {
 		SDE_DEBUG(
-			"display preference is not met. display_type: %d lm_features: %x\n",
+			"display preference is not met. display_type: %d lm_features: %lx\n",
 			(int)reqs->hw_res.display_type, lm_cfg->features);
 		return false;
 	}
@@ -2062,6 +2062,7 @@ void sde_rm_release(struct sde_rm *rm, struct drm_encoder *enc, bool nxt)
 			CONNECTOR_PROP_TOPOLOGY_CONTROL);
 
 	SDE_EVT32(enc->base.id, conn->base.id, rsvp->seq, top_ctrl, nxt);
+
 	if (top_ctrl & BIT(SDE_RM_TOPCTL_RESERVE_LOCK)) {
 		SDE_DEBUG("rsvp[s%de%d] not releasing locked resources\n",
 				rsvp->seq, rsvp->enc_id);
@@ -2126,8 +2127,8 @@ struct sde_rm_rsvp *_sde_rm_poll_get_rsvp_nxt_locked(struct sde_rm *rm,
 		usleep_range(sleep, sleep * 2);
 		mutex_lock(&rm->rm_lock);
 	}
-	/* make sure to get latest rsvp_next to avoid use after free issues  */
-	return _sde_rm_get_rsvp_nxt(rm, enc);
+
+	return rsvp_nxt;
 }
 
 int sde_rm_reserve(
@@ -2184,15 +2185,13 @@ int sde_rm_reserve(
 	 * Poll for rsvp_nxt clear, allow the check_only commit if rsvp_nxt
 	 * gets cleared and bailout if it does not get cleared before timeout.
 	 */
-	if (test_only && rsvp_nxt) {
+	if (test_only && rsvp_cur && rsvp_nxt) {
 		rsvp_nxt = _sde_rm_poll_get_rsvp_nxt_locked(rm, enc);
-		rsvp_cur = _sde_rm_get_rsvp(rm, enc);
 		if (rsvp_nxt) {
 			SDE_ERROR("poll timeout cur %d nxt %d enc %d\n",
-				(rsvp_cur) ? rsvp_cur->seq : -1,
-				rsvp_nxt->seq, enc->base.id);
-			SDE_EVT32(enc->base.id, (rsvp_cur) ? rsvp_cur->seq : -1,
-					rsvp_nxt->seq, SDE_EVTLOG_ERROR);
+				rsvp_cur->seq, rsvp_nxt->seq, enc->base.id);
+			SDE_EVT32(rsvp_cur->seq, rsvp_nxt->seq,
+					 enc->base.id, SDE_EVTLOG_ERROR);
 			ret = -EINVAL;
 			goto end;
 		}

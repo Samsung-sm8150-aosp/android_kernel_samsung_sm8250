@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
  */
 
 #include <asm/dma-iommu.h>
@@ -846,7 +846,6 @@ int read_platform_resources_from_drv_data(
 
 	res->vpu_ver = platform_data->vpu_ver;
 	res->ubwc_config = platform_data->ubwc_config;
-	res->max_inst_count = platform_data->max_inst_count;
 
 	return rc;
 
@@ -1026,6 +1025,10 @@ static int msm_vidc_setup_context_bank(struct msm_vidc_platform_resources *res,
 	 * iommu mapping returns one mapping (which is required for partial
 	 * cache operations)
 	 */
+	if(!strcmp(cb->name,"venus_ns")) {
+		d_vpr_e("%s: call dma best fit for venus_ns\n", __func__);
+		iommu_dma_enable_best_fit_algo(cb->dev);
+	}
 	if (!dev->dma_parms)
 		dev->dma_parms =
 			devm_kzalloc(dev, sizeof(*dev->dma_parms), GFP_KERNEL);

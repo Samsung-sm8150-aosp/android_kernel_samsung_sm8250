@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2015-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #define pr_fmt(fmt)	"[drm:%s:%d] " fmt, __func__, __LINE__
@@ -11,6 +10,10 @@
 #include "sde_formats.h"
 #include "dsi_display.h"
 #include "sde_trace.h"
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+#include "ss_dsi_panel_common.h"
+#endif
 
 #define SDE_DEBUG_VIDENC(e, fmt, ...) SDE_DEBUG("enc%d intf%d " fmt, \
 		(e) && (e)->base.parent ? \
@@ -462,7 +465,7 @@ static void sde_encoder_phys_vid_setup_timing_engine(
 exit:
 	if (phys_enc->parent_ops.get_qsync_fps)
 		phys_enc->parent_ops.get_qsync_fps(
-			phys_enc->parent, &qsync_min_fps, mode.vrefresh);
+				phys_enc->parent, &qsync_min_fps);
 
 	/* only panels which support qsync will have a non-zero min fps */
 	if (qsync_min_fps) {
@@ -489,6 +492,10 @@ static void sde_encoder_phys_vid_vblank_irq(void *arg, int irq_idx)
 	hw_ctl = phys_enc->hw_ctl;
 	if (!hw_ctl)
 		return;
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	SDE_DEBUG_VIDENC(to_sde_encoder_phys_vid(phys_enc), "\n");
+#endif
 
 	SDE_ATRACE_BEGIN("vblank_irq");
 
@@ -548,6 +555,10 @@ not_flushed:
 	SDE_ATRACE_END("vblank_irq");
 }
 
+#ifdef CONFIG_SEC_DISPLAYPORT
+extern int secdp_get_hpd_status(void);
+#endif
+
 static void sde_encoder_phys_vid_underrun_irq(void *arg, int irq_idx)
 {
 	struct sde_encoder_phys *phys_enc = arg;
@@ -555,9 +566,30 @@ static void sde_encoder_phys_vid_underrun_irq(void *arg, int irq_idx)
 	if (!phys_enc)
 		return;
 
+#ifdef CONFIG_SEC_DISPLAYPORT
+	if (secdp_get_hpd_status()) {
+		/* prints underrun log in case of DP connection */
+		SDE_ERROR("underrun while DP connection, intf:%d, type:%d\n",
+			phys_enc->intf_idx, phys_enc->parent->encoder_type);
+	}
+#endif
+
 	if (phys_enc->parent_ops.handle_underrun_virt)
 		phys_enc->parent_ops.handle_underrun_virt(phys_enc->parent,
 			phys_enc);
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	if (phys_enc->parent->encoder_type == DRM_MODE_ENCODER_DSI) {
+		SDE_DEBUG_VIDENC(to_sde_encoder_phys_vid(phys_enc), "underrun\n");
+#if defined(CONFIG_SEC_DEBUG)
+		if (sec_debug_is_enabled()) {
+			SDE_EVT32(DRMID(phys_enc->parent), SDE_EVTLOG_FATAL);
+			SDE_DBG_DUMP_WQ("all", "dbg_bus", "vbif_dbg_bus");
+		}
+#endif
+	}
+#endif
+
 }
 
 static void _sde_encoder_phys_vid_setup_irq_hw_idx(
@@ -1075,44 +1107,18 @@ static void sde_encoder_phys_vid_disable(struct sde_encoder_phys *phys_enc)
 
 	sde_encoder_helper_phys_disable(phys_enc, NULL);
 exit:
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	if (!sde_encoder_phys_vid_is_master(phys_enc)) {
+		phys_enc->hw_intf->ops.enable_timing(phys_enc->hw_intf, 0);
+		SDE_DEBUG_VIDENC(vid_enc, "disable timing gen\n");
+	}
+#endif
+
 	SDE_EVT32(DRMID(phys_enc->parent),
 		atomic_read(&phys_enc->pending_retire_fence_cnt));
 	phys_enc->vfp_cached = 0;
 	phys_enc->enable_state = SDE_ENC_DISABLED;
-}
-
-static int sde_encoder_phys_vid_poll_for_active_region(
-					struct sde_encoder_phys *phys_enc)
-{
-	struct sde_encoder_phys_vid *vid_enc;
-	struct intf_timing_params *timing;
-	struct drm_display_mode mode;
-	u32 line_cnt, v_inactive, poll_time_us, trial = 0;
-
-	if (!phys_enc || !phys_enc->hw_intf ||
-				!phys_enc->hw_intf->ops.get_line_count)
-		return -EINVAL;
-
-	vid_enc = to_sde_encoder_phys_vid(phys_enc);
-	timing = &vid_enc->timing_params;
-	mode = phys_enc->cached_mode;
-
-	/* if programmable fetch is not enabled return early */
-	if (!programmable_fetch_get_num_lines(vid_enc, timing, false))
-		return 0;
-
-	poll_time_us = DIV_ROUND_UP(1000000, mode.vrefresh) / MAX_POLL_CNT;
-	v_inactive = timing->v_front_porch + timing->v_back_porch +
-						timing->vsync_pulse_width;
-
-	do {
-		usleep_range(poll_time_us, poll_time_us + 5);
-		line_cnt = phys_enc->hw_intf->ops.get_line_count(
-							phys_enc->hw_intf);
-		trial++;
-	} while ((trial < MAX_POLL_CNT) || (line_cnt < v_inactive));
-
-	return (trial >= MAX_POLL_CNT) ? -ETIMEDOUT : 0;
 }
 
 static void sde_encoder_phys_vid_handle_post_kickoff(
@@ -1121,7 +1127,6 @@ static void sde_encoder_phys_vid_handle_post_kickoff(
 	unsigned long lock_flags;
 	struct sde_encoder_phys_vid *vid_enc;
 	u32 avr_mode;
-	u32 ret;
 
 	if (!phys_enc) {
 		SDE_ERROR("invalid encoder\n");
@@ -1144,11 +1149,6 @@ static void sde_encoder_phys_vid_handle_post_kickoff(
 				1);
 			spin_unlock_irqrestore(phys_enc->enc_spinlock,
 				lock_flags);
-			ret = sde_encoder_phys_vid_poll_for_active_region(
-								     phys_enc);
-			if (ret)
-				SDE_DEBUG_VIDENC(vid_enc,
-				       "poll for active failed ret:%d\n", ret);
 		}
 		phys_enc->enable_state = SDE_ENC_ENABLED;
 	}
@@ -1166,21 +1166,13 @@ static void sde_encoder_phys_vid_handle_post_kickoff(
 static void sde_encoder_phys_vid_prepare_for_commit(
 		struct sde_encoder_phys *phys_enc)
 {
-	struct drm_crtc *crtc;
 
-	if (!phys_enc  || !phys_enc->parent) {
+	if (!phys_enc) {
 		SDE_ERROR("invalid encoder parameters\n");
 		return;
 	}
 
-	crtc = phys_enc->parent->crtc;
-	if (!crtc || !crtc->state) {
-		SDE_ERROR("invalid crtc or crtc state\n");
-		return;
-	}
-
-	if (!msm_is_mode_seamless_vrr(&crtc->state->adjusted_mode) &&
-		sde_connector_is_qsync_updated(phys_enc->connector))
+	if (sde_connector_is_qsync_updated(phys_enc->connector))
 		_sde_encoder_phys_vid_avr_ctrl(phys_enc);
 
 }

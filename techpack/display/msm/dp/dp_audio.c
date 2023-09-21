@@ -1,13 +1,19 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2019, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/of_platform.h>
 #include <linux/msm_ext_display.h>
 
 #include <drm/drm_dp_helper.h>
+
+#ifdef CONFIG_SEC_DISPLAYPORT
+#include "secdp.h"
+#ifdef CONFIG_SEC_DISPLAYPORT_BIGDATA
+#include <linux/displayport_bigdata.h>
+#endif
+#endif
 
 #include "dp_catalog.h"
 #include "dp_audio.h"
@@ -293,18 +299,10 @@ static void dp_audio_isrc_sdp(struct dp_audio_private *audio)
 
 static void dp_audio_setup_sdp(struct dp_audio_private *audio)
 {
-	struct sde_edid_ctrl *edid;
-
 	if (!atomic_read(&audio->session_on)) {
 		DP_WARN("session inactive\n");
 		return;
 	}
-
-	if (!audio->panel || !audio->panel->edid_ctrl) {
-		DP_ERR("Invalid panel data.");
-		return;
-	}
-	edid = audio->panel->edid_ctrl;
 
 	/* always program stream 0 first before actual stream cfg */
 	audio->catalog->stream_id = DP_STREAM_0;
@@ -318,14 +316,8 @@ static void dp_audio_setup_sdp(struct dp_audio_private *audio)
 	dp_audio_stream_sdp(audio);
 	dp_audio_timestamp_sdp(audio);
 	dp_audio_infoframe_sdp(audio);
-
-	DP_DEBUG("Sink supports ACP and ISRC: %d",
-		edid->hdmi_vsdb.supports_ai);
-
-	if (edid->hdmi_vsdb.supports_ai) {
-		dp_audio_copy_management_sdp(audio);
-		dp_audio_isrc_sdp(audio);
-	}
+	dp_audio_copy_management_sdp(audio);
+	dp_audio_isrc_sdp(audio);
 }
 
 static void dp_audio_setup_acr(struct dp_audio_private *audio)
@@ -412,6 +404,11 @@ static int dp_audio_info_setup(struct platform_device *pdev,
 		return rc;
 	}
 
+#ifdef CONFIG_SEC_DISPLAYPORT_BIGDATA
+	secdp_bigdata_save_item(BD_AUD_CH, params->num_of_channels);
+	secdp_bigdata_save_item(BD_AUD_FREQ, params->sample_rate_hz);
+#endif
+
 	mutex_lock(&audio->ops_lock);
 
 	audio->channels = params->num_of_channels;
@@ -463,6 +460,13 @@ static int dp_audio_get_edid_blk(struct platform_device *pdev,
 
 	blk->audio_data_blk = edid->audio_data_block;
 	blk->audio_data_blk_size = edid->adb_size;
+#if defined(CONFIG_SEC_DISPLAYPORT)
+	print_hex_dump(KERN_DEBUG, "AUDIO_BLK: ",
+			DUMP_PREFIX_NONE, 16, 1, blk->audio_data_blk,
+			blk->audio_data_blk_size, false);
+	secdp_logger_hex_dump(blk->audio_data_blk, "AUDIO_BLK:",
+			blk->audio_data_blk_size);
+#endif
 
 	blk->spk_alloc_data_blk = edid->spkr_alloc_data_block;
 	blk->spk_alloc_data_blk_size = edid->sadb_size;
@@ -580,6 +584,8 @@ static int dp_audio_register_ext_disp(struct dp_audio_private *audio)
 	const char *phandle = "qcom,ext-disp";
 	struct msm_ext_disp_init_data *ext;
 	struct msm_ext_disp_audio_codec_ops *ops;
+
+	DP_DEBUG("+++\n");
 
 	ext = &audio->ext_audio_data;
 	ops = &ext->codec_ops;
@@ -743,11 +749,20 @@ static int dp_audio_on(struct dp_audio *dp_audio)
 		return -EINVAL;
 	}
 
+#ifdef CONFIG_SEC_DISPLAYPORT
+	if (!secdp_get_cable_status()) {
+		DP_INFO("cable is out\n");
+		return -EINVAL;
+	}
+#endif
+
 	audio = container_of(dp_audio, struct dp_audio_private, dp_audio);
 	if (IS_ERR(audio)) {
 		DP_ERR("invalid input\n");
 		return -EINVAL;
 	}
+
+	DP_DEBUG("+++\n");
 
 	dp_audio_register_ext_disp(audio);
 
@@ -763,7 +778,7 @@ static int dp_audio_on(struct dp_audio *dp_audio)
 	if (rc)
 		goto end;
 
-	DP_DEBUG("success\n");
+	DP_INFO("success\n");
 end:
 	return rc;
 }
@@ -779,6 +794,8 @@ static int dp_audio_off(struct dp_audio *dp_audio)
 		DP_ERR("invalid input\n");
 		return -EINVAL;
 	}
+
+	DP_DEBUG("+++\n");
 
 	audio = container_of(dp_audio, struct dp_audio_private, dp_audio);
 
@@ -797,7 +814,7 @@ static int dp_audio_off(struct dp_audio *dp_audio)
 	if (rc)
 		goto end;
 
-	DP_DEBUG("success\n");
+	DP_INFO("success\n");
 end:
 	dp_audio_config(audio, EXT_DISPLAY_CABLE_DISCONNECT);
 

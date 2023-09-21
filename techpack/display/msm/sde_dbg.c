@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2009-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #define pr_fmt(fmt)	"[drm:%s:%d] " fmt, __func__, __LINE__
@@ -19,6 +18,10 @@
 
 #include "sde_dbg.h"
 #include "sde/sde_hw_catalog.h"
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+#include "ss_dsi_panel_common.h"
+#endif
 
 #define SDE_DBG_BASE_MAX		10
 
@@ -76,6 +79,19 @@
 #define DUMP_CLMN_COUNT			4
 #define DUMP_LINE_SIZE			256
 #define DUMP_MAX_LINES_PER_BLK		512
+
+#ifdef CONFIG_DISPLAY_SAMSUNG
+/**
+ * To print in kernel log
+ */
+#undef DEFAULT_REGDUMP
+#undef DEFAULT_DBGBUS_SDE
+#undef DEFAULT_DBGBUS_VBIFRT
+
+#define DEFAULT_REGDUMP		SDE_DBG_DUMP_IN_LOG
+#define DEFAULT_DBGBUS_SDE	SDE_DBG_DUMP_IN_LOG
+#define DEFAULT_DBGBUS_VBIFRT	SDE_DBG_DUMP_IN_LOG
+#endif
 
 /**
  * struct sde_dbg_reg_offset - tracking for start and end of region
@@ -198,8 +214,6 @@ struct sde_dbg_regbuf {
 /**
  * struct sde_dbg_base - global sde debug base structure
  * @evtlog: event log instance
- * @reglog: reg log instance
- * @reg_dump_base: base address of register dump region
  * @reg_base_list: list of register dumping regions
  * @dev: device pointer
  * @mutex: mutex to serialize access to serialze dumps, debugfs access
@@ -215,16 +229,12 @@ struct sde_dbg_regbuf {
  * @dsi_dbg_bus: dump dsi debug bus register
  * @regbuf: buffer data to track the register dumping in hw recovery
  * @cur_evt_index: index used for tracking event logs dump in hw recovery
- * @cur_reglog_index: index used for tracking register logs dump in hw recovery
  * @dbgbus_dump_idx: index used for tracking dbg-bus dump in hw recovery
  * @vbif_dbgbus_dump_idx: index for tracking vbif dumps in hw recovery
  */
 static struct sde_dbg_base {
 	struct sde_dbg_evtlog *evtlog;
-	struct sde_dbg_reglog *reglog;
 	struct list_head reg_base_list;
-	void *reg_dump_base;
-	void *reg_dump_addr;
 	struct device *dev;
 	struct mutex mutex;
 
@@ -245,7 +255,6 @@ static struct sde_dbg_base {
 
 	struct sde_dbg_regbuf regbuf;
 	u32 cur_evt_index;
-	u32 cur_reglog_index;
 	u32 dbgbus_dump_idx;
 	u32 vbif_dbgbus_dump_idx;
 	enum sde_dbg_dump_context dump_mode;
@@ -253,9 +262,6 @@ static struct sde_dbg_base {
 
 /* sde_dbg_base_evtlog - global pointer to main sde event log for macro use */
 struct sde_dbg_evtlog *sde_dbg_base_evtlog;
-
-/* sde_dbg_base_reglog - global pointer to main sde reg log for macro use */
-struct sde_dbg_reglog *sde_dbg_base_reglog;
 
 static void _sde_debug_bus_xbar_dump(void __iomem *mem_base,
 		struct sde_debug_bus_entry *entry, u32 val)
@@ -2933,7 +2939,6 @@ static void _sde_dump_reg(const char *dump_name, u32 reg_dump_flag,
 		char *base_addr, char *addr, size_t len_bytes, u32 **dump_mem)
 {
 	u32 in_log, in_mem, len_align, len_padded;
-	struct sde_dbg_base *dbg_base = &sde_dbg_base;
 	u32 *dump_addr = NULL;
 	char *end_addr;
 	int i;
@@ -2962,8 +2967,9 @@ static void _sde_dump_reg(const char *dump_name, u32 reg_dump_flag,
 
 	if (in_mem) {
 		if (dump_mem && !(*dump_mem)) {
-			*dump_mem = dbg_base->reg_dump_addr;
-			dbg_base->reg_dump_addr += len_padded;
+			phys_addr_t phys = 0;
+			*dump_mem = dma_alloc_coherent(sde_dbg_base.dev,
+					len_padded, &phys, GFP_KERNEL);
 		}
 
 		if (dump_mem && *dump_mem) {
@@ -3037,49 +3043,6 @@ static u32 _sde_dbg_get_dump_range(struct sde_dbg_reg_offset *range_node,
 	return length;
 }
 
-static u32 _sde_dbg_get_reg_blk_size(struct sde_dbg_reg_base *dbg)
-{
-	u32 len, len_align, len_padded;
-	u32 size = 0;
-	struct sde_dbg_reg_range *range_node;
-
-	if (!dbg || !dbg->base) {
-		pr_err("dbg base is null!\n");
-		return 0;
-	}
-
-	if (!list_empty(&dbg->sub_range_list)) {
-		list_for_each_entry(range_node, &dbg->sub_range_list, head) {
-			len = _sde_dbg_get_dump_range(&range_node->offset,
-					dbg->max_offset);
-			len_align = (len + REG_DUMP_ALIGN - 1) / REG_DUMP_ALIGN;
-			len_padded = len_align * REG_DUMP_ALIGN;
-			size += REG_BASE_NAME_LEN + RANGE_NAME_LEN + len_padded;
-		}
-	} else {
-		len = dbg->max_offset;
-		len_align = (len + REG_DUMP_ALIGN - 1) / REG_DUMP_ALIGN;
-		len_padded = len_align * REG_DUMP_ALIGN;
-		size += REG_BASE_NAME_LEN + RANGE_NAME_LEN + len_padded;
-	}
-	return size;
-}
-
-static u32 _sde_dbg_get_reg_dump_size(void)
-{
-	struct sde_dbg_base *dbg_base = &sde_dbg_base;
-	struct sde_dbg_reg_base *blk_base;
-	u32 size = 0;
-
-	if (!dbg_base)
-		return 0;
-
-	list_for_each_entry(blk_base, &dbg_base->reg_base_list, reg_base_head) {
-		size += _sde_dbg_get_reg_blk_size(blk_base);
-	}
-	return size;
-}
-
 static int _sde_dump_reg_range_cmp(void *priv, struct list_head *a,
 		struct list_head *b)
 {
@@ -3125,7 +3088,6 @@ static void _sde_dump_reg_by_ranges(struct sde_dbg_reg_base *dbg,
 	char *addr;
 	size_t len;
 	struct sde_dbg_reg_range *range_node;
-	struct sde_dbg_base *dbg_base = &sde_dbg_base;
 
 	if (!dbg || !(dbg->base || dbg->cb)) {
 		pr_err("dbg base is null!\n");
@@ -3155,12 +3117,6 @@ static void _sde_dump_reg_by_ranges(struct sde_dbg_reg_base *dbg,
 				addr, range_node->offset.start,
 				range_node->offset.end);
 
-			scnprintf(dbg_base->reg_dump_addr, REG_BASE_NAME_LEN,
-					dbg->name);
-			dbg_base->reg_dump_addr += REG_BASE_NAME_LEN;
-			scnprintf(dbg_base->reg_dump_addr, REG_BASE_NAME_LEN,
-					range_node->range_name);
-			dbg_base->reg_dump_addr += RANGE_NAME_LEN;
 			_sde_dump_reg(range_node->range_name, reg_dump_flag,
 					dbg->base, addr, len,
 					&range_node->reg_dump);
@@ -3173,10 +3129,6 @@ static void _sde_dump_reg_by_ranges(struct sde_dbg_reg_base *dbg,
 				dbg->max_offset);
 		addr = dbg->base;
 		len = dbg->max_offset;
-		scnprintf(dbg_base->reg_dump_addr, REG_BASE_NAME_LEN,
-				dbg->name);
-		dbg_base->reg_dump_addr += REG_BASE_NAME_LEN;
-		dbg_base->reg_dump_addr += RANGE_NAME_LEN;
 		_sde_dump_reg(dbg->name, reg_dump_flag, dbg->base, addr, len,
 				&dbg->reg_dump);
 	}
@@ -3254,6 +3206,7 @@ static void _sde_dbg_dump_sde_dbg_bus(struct sde_dbg_sde_debug_bus *bus)
 	u32 *dump_addr = NULL;
 	u32 status = 0;
 	struct sde_debug_bus_entry *head;
+	phys_addr_t phys = 0;
 	int list_size;
 	int i;
 	u32 offset;
@@ -3291,7 +3244,8 @@ static void _sde_dbg_dump_sde_dbg_bus(struct sde_dbg_sde_debug_bus *bus)
 
 	if (in_mem) {
 		if (!(*dump_mem))
-			*dump_mem =  vzalloc(list_size);
+			*dump_mem = dma_alloc_coherent(sde_dbg_base.dev,
+				list_size, &phys, GFP_KERNEL);
 
 		if (*dump_mem) {
 			dump_addr = *dump_mem;
@@ -3401,6 +3355,7 @@ static void _sde_dbg_dump_vbif_dbg_bus(struct sde_dbg_vbif_debug_bus *bus)
 	u32 value, d0, d1;
 	unsigned long reg, reg1, reg2;
 	struct vbif_debug_bus_entry *head;
+	phys_addr_t phys = 0;
 	int i, list_size = 0;
 	void __iomem *mem_base = NULL;
 	struct vbif_debug_bus_entry *dbg_bus;
@@ -3450,7 +3405,8 @@ static void _sde_dbg_dump_vbif_dbg_bus(struct sde_dbg_vbif_debug_bus *bus)
 
 	if (in_mem) {
 		if (!(*dump_mem))
-			*dump_mem =  vzalloc(list_size);
+			*dump_mem = dma_alloc_coherent(sde_dbg_base.dev,
+				list_size, &phys, GFP_KERNEL);
 
 		if (*dump_mem) {
 			dump_addr = *dump_mem;
@@ -3539,20 +3495,8 @@ static void _sde_dump_array(struct sde_dbg_reg_base *blk_arr[],
 	bool dump_dbgbus_vbif_rt, bool dump_all, bool dump_secure)
 {
 	int i;
-	u32 reg_dump_size;
-	struct sde_dbg_base *dbg_base = &sde_dbg_base;
 
 	mutex_lock(&sde_dbg_base.mutex);
-
-	reg_dump_size =  _sde_dbg_get_reg_dump_size();
-	if (!dbg_base->reg_dump_base)
-		dbg_base->reg_dump_base = vzalloc(reg_dump_size);
-
-	dbg_base->reg_dump_addr =  dbg_base->reg_dump_base;
-
-	if (!dbg_base->reg_dump_addr)
-		pr_err("Failed to allocate memory for reg_dump_addr size:%d\n",
-				reg_dump_size);
 
 	if (dump_all)
 		sde_evtlog_dump_all(sde_dbg_base.evtlog);
@@ -3578,8 +3522,12 @@ static void _sde_dump_array(struct sde_dbg_reg_base *blk_arr[],
 		dsi_ctrl_debug_dump(sde_dbg_base.dbgbus_dsi.entries,
 				    sde_dbg_base.dbgbus_dsi.size);
 
+#if defined(CONFIG_DISPLAY_SAMSUNG)
 	if (do_panic && sde_dbg_base.panic_on_err)
-		panic(name);
+		ss_store_xlog_panic_dbg();
+#endif
+	if (do_panic && sde_dbg_base.panic_on_err)
+		panic("%s", name);
 
 	mutex_unlock(&sde_dbg_base.mutex);
 }
@@ -3731,7 +3679,7 @@ void sde_dbg_ctrl(const char *name, ...)
 	va_end(args);
 }
 
-#ifdef CONFIG_DEBUG_FS
+
 /*
  * sde_dbg_debugfs_open - debugfs open handler for evtlog dump
  * @inode: debugfs inode
@@ -3819,6 +3767,25 @@ static ssize_t sde_evtlog_dump_read(struct file *file, char __user *buff,
 	return len;
 }
 
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+void ss_sde_dbg_debugfs_open(void)
+{
+	mutex_lock(&sde_dbg_base.mutex);
+	sde_dbg_base.cur_evt_index = 0;
+	sde_dbg_base.evtlog->first = sde_dbg_base.evtlog->curr + 1;
+	sde_dbg_base.evtlog->last =
+		sde_dbg_base.evtlog->first + SDE_EVTLOG_ENTRY;
+	mutex_unlock(&sde_dbg_base.mutex);
+}
+
+ssize_t ss_sde_evtlog_dump_read(struct file *file, char __user *buff,
+		size_t count, loff_t *ppos)
+{
+	return sde_evtlog_dump_read(file, buff, count, ppos);
+}
+#endif
+
 /**
  * sde_evtlog_dump_write - debugfs write handler for evtlog dump
  * @file: file handler
@@ -3829,8 +3796,13 @@ static ssize_t sde_evtlog_dump_read(struct file *file, char __user *buff,
 static ssize_t sde_evtlog_dump_write(struct file *file,
 	const char __user *user_buf, size_t count, loff_t *ppos)
 {
+#if defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
+	_sde_dump_array(NULL, 0, 0, "dump_debugfs",
+		true, true, true, false);
+#else
 	_sde_dump_array(NULL, 0, sde_dbg_base.panic_on_err, "dump_debugfs",
 		true, true, true, false);
+#endif
 
 	return count;
 }
@@ -4055,7 +4027,7 @@ static ssize_t sde_recovery_regdump_read(struct file *file, char __user *ubuf,
 	mutex_lock(&sde_dbg_base.mutex);
 	if (!rbuf->dump_done && !rbuf->cur_blk) {
 		if (!rbuf->buf)
-			rbuf->buf = vzalloc(DUMP_BUF_SIZE);
+			rbuf->buf = kzalloc(DUMP_BUF_SIZE, GFP_KERNEL);
 		if (!rbuf->buf) {
 			len =  -ENOMEM;
 			goto err;
@@ -4629,7 +4601,11 @@ int sde_dbg_debugfs_register(struct device *dev)
 
 	debugfs_create_file("dbg_ctrl", 0600, debugfs_root, NULL,
 			&sde_dbg_ctrl_fops);
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	debugfs_create_file("dump", 0644, debugfs_root, NULL,
+#else
 	debugfs_create_file("dump", 0600, debugfs_root, NULL,
+#endif
 			&sde_evtlog_fops);
 	debugfs_create_u32("enable", 0600, debugfs_root,
 			&(sde_dbg_base.evtlog->enable));
@@ -4672,15 +4648,6 @@ int sde_dbg_debugfs_register(struct device *dev)
 
 	return 0;
 }
-
-#else
-
-int sde_dbg_debugfs_register(struct device *dev)
-{
-	return 0;
-}
-
-#endif
 
 static void _sde_dbg_debugfs_destroy(void)
 {
@@ -4732,10 +4699,11 @@ void sde_dbg_init_dbg_buses(u32 hwversion)
 
 int sde_dbg_init(struct device *dev)
 {
-	if (!dev) {
-		pr_err("invalid params\n");
-		return -EINVAL;
-	}
+	if (dev) {
+		sde_dbg_base.dev = dev;
+		//pr_err("invalid params\n");
+		return 0;
+ 	}
 
 	mutex_init(&sde_dbg_base.mutex);
 	INIT_LIST_HEAD(&sde_dbg_base.reg_base_list);
@@ -4747,15 +4715,17 @@ int sde_dbg_init(struct device *dev)
 
 	sde_dbg_base_evtlog = sde_dbg_base.evtlog;
 
-	sde_dbg_base.reglog = sde_reglog_init();
-	if (IS_ERR_OR_NULL(sde_dbg_base.reglog))
-		return PTR_ERR(sde_dbg_base.reglog);
-
-	sde_dbg_base_reglog = sde_dbg_base.reglog;
-
 	INIT_WORK(&sde_dbg_base.dump_work, _sde_dump_work);
 	sde_dbg_base.work_panic = false;
+
+#if defined(CONFIG_DISPLAY_SAMSUNG) && defined(CONFIG_SEC_DEBUG)
+	if (sec_debug_is_enabled())
+		sde_dbg_base.panic_on_err = DEFAULT_PANIC;
+	else
+		sde_dbg_base.panic_on_err = 0;
+#else
 	sde_dbg_base.panic_on_err = DEFAULT_PANIC;
+#endif
 	sde_dbg_base.enable_reg_dump = DEFAULT_REGDUMP;
 	memset(&sde_dbg_base.regbuf, 0, sizeof(sde_dbg_base.regbuf));
 
@@ -4785,32 +4755,19 @@ static void sde_dbg_reg_base_destroy(void)
 		list_del(&blk_base->reg_base_head);
 		kfree(blk_base);
 	}
-	vfree(dbg_base->reg_dump_base);
 }
-
-static void sde_dbg_buses_destroy(void)
-{
-	struct sde_dbg_base *dbg_base = &sde_dbg_base;
-
-	vfree(dbg_base->dbgbus_sde.cmn.dumped_content);
-	vfree(dbg_base->dbgbus_vbif_rt.cmn.dumped_content);
-}
-
 /**
  * sde_dbg_destroy - destroy sde debug facilities
  */
 void sde_dbg_destroy(void)
 {
-	vfree(sde_dbg_base.regbuf.buf);
+	kfree(sde_dbg_base.regbuf.buf);
 	memset(&sde_dbg_base.regbuf, 0, sizeof(sde_dbg_base.regbuf));
 	_sde_dbg_debugfs_destroy();
 	sde_dbg_base_evtlog = NULL;
 	sde_evtlog_destroy(sde_dbg_base.evtlog);
 	sde_dbg_base.evtlog = NULL;
-	sde_reglog_destroy(sde_dbg_base.reglog);
-	sde_dbg_base.reglog = NULL;
 	sde_dbg_reg_base_destroy();
-	sde_dbg_buses_destroy();
 	mutex_destroy(&sde_dbg_base.mutex);
 }
 

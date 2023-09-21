@@ -1,7 +1,4 @@
 /*
- * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
- */
-/*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
  * Copyright (C) 2013 Red Hat
  * Author: Rob Clark <robdclark@gmail.com>
@@ -42,9 +39,11 @@
 
 #include <linux/of_address.h>
 #include <linux/kthread.h>
+#include <linux/suspend.h>
 #include <uapi/linux/sched/types.h>
 #include <drm/drm_of.h>
 
+#include <linux/sde_rsc.h>
 #include "msm_drv.h"
 #include "msm_kms.h"
 #include "msm_mmu.h"
@@ -65,6 +64,28 @@
 #define MSM_VERSION_PATCHLEVEL	0
 
 static DEFINE_MUTEX(msm_release_lock);
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+static BLOCKING_NOTIFIER_HEAD(msm_drm_notifier_list);
+
+int msm_drm_register_notifier_client(struct notifier_block *nb)
+{
+	return blocking_notifier_chain_register(&msm_drm_notifier_list, nb);
+}
+EXPORT_SYMBOL(msm_drm_register_notifier_client);
+
+int msm_drm_unregister_notifier_client(struct notifier_block *nb)
+{
+	return blocking_notifier_chain_unregister(&msm_drm_notifier_list, nb);
+}
+EXPORT_SYMBOL(msm_drm_unregister_notifier_client);
+
+int __msm_drm_notifier_call_chain(unsigned long event, void *data)
+{
+	return blocking_notifier_call_chain(&msm_drm_notifier_list,
+					event, data);
+}
+#endif
 
 static void msm_fb_output_poll_changed(struct drm_device *dev)
 {
@@ -358,6 +379,8 @@ static int msm_drm_uninit(struct device *dev)
 	struct msm_kms *kms = priv->kms;
 	int i;
 
+	unregister_pm_notifier(&priv->pm_notifier);
+
 	/* clean up display commit/event worker threads */
 	for (i = 0; i < priv->num_crtcs; i++) {
 		if (priv->disp_thread[i].thread) {
@@ -543,6 +566,29 @@ static int msm_component_bind_all(struct device *dev,
 }
 #endif
 
+static int msm_drm_pm_notifier(struct notifier_block *notifier,
+	unsigned long pm_event, void* unused)
+{
+	struct msm_drm_private *priv = container_of(notifier,
+		struct msm_drm_private, pm_notifier);
+	int i;
+
+	switch (pm_event) {
+	case PM_SUSPEND_PREPARE:
+		for (i = 0; i < priv->num_crtcs; i++) {
+			if (priv->disp_thread[i].thread)
+				kthread_flush_worker(&priv->disp_thread[i].worker);
+			if (priv->event_thread[i].thread)
+				kthread_flush_worker(&priv->event_thread[i].worker);
+		}
+		kthread_flush_worker(&priv->pp_event_worker);
+		break;
+	default:
+		break;
+	}
+	return NOTIFY_DONE;
+}
+
 static int msm_drm_display_thread_create(struct sched_param param,
 	struct msm_drm_private *priv, struct drm_device *ddev,
 	struct device *dev)
@@ -716,6 +762,7 @@ static int msm_drm_init(struct device *dev, struct drm_driver *drv)
 		return -ENOMEM;
 	}
 
+	reg_log_dump(__func__, __LINE__);
 	drm_mode_config_init(ddev);
 	platform_set_drvdata(pdev, ddev);
 
@@ -800,6 +847,7 @@ static int msm_drm_init(struct device *dev, struct drm_driver *drv)
 
 	drm_mode_config_reset(ddev);
 
+	reg_log_dump(__func__, __LINE__);
 	if (kms && kms->funcs && kms->funcs->cont_splash_config) {
 		ret = kms->funcs->cont_splash_config(kms);
 		if (ret) {
@@ -828,7 +876,11 @@ static int msm_drm_init(struct device *dev, struct drm_driver *drv)
 		}
 	}
 
+	reg_log_dump(__func__, __LINE__);
 	drm_kms_helper_poll_init(ddev);
+
+	priv->pm_notifier.notifier_call = msm_drm_pm_notifier;
+	register_pm_notifier(&priv->pm_notifier);
 
 	return 0;
 
@@ -845,13 +897,17 @@ mdss_init_fail:
 	kfree(priv);
 priv_alloc_fail:
 	drm_dev_put(ddev);
-	platform_set_drvdata(pdev, NULL);
 	return ret;
 }
 
 /*
  * DRM operations:
  */
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+struct msm_file_private *msm_ioctl_power_ctrl_ctx = NULL;
+DEFINE_MUTEX(msm_ioctl_power_ctrl_ctx_lock);
+#endif
 
 static int context_init(struct drm_device *dev, struct drm_file *file)
 {
@@ -884,6 +940,13 @@ static int msm_open(struct drm_device *dev, struct drm_file *file)
 
 static void context_close(struct msm_file_private *ctx)
 {
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	mutex_lock(&msm_ioctl_power_ctrl_ctx_lock);
+	if (msm_ioctl_power_ctrl_ctx == ctx)
+		msm_ioctl_power_ctrl_ctx = NULL;
+	mutex_unlock(&msm_ioctl_power_ctrl_ctx_lock);
+#endif
+
 	kfree(ctx);
 }
 
@@ -1516,13 +1579,6 @@ static int msm_release(struct inode *inode, struct file *filp)
 		kfree(node);
 	}
 
-	/**
-	 * Handle preclose operation here for removing fb's whose
-	 * refcount > 1. This operation is not triggered from upstream
-	 * drm as msm_driver does not support DRIVER_LEGACY feature.
-	 */
-	msm_preclose(dev, file_priv);
-
 	ret = drm_release(inode, filp);
 	filp->private_data = NULL;
 end:
@@ -1603,6 +1659,12 @@ int msm_ioctl_power_ctrl(struct drm_device *dev, void *data,
 
 	priv = dev->dev_private;
 
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	mutex_lock(&msm_ioctl_power_ctrl_ctx_lock);
+	msm_ioctl_power_ctrl_ctx = ctx;
+	mutex_unlock(&msm_ioctl_power_ctrl_ctx_lock);
+#endif
+
 	mutex_lock(&ctx->power_lock);
 
 	old_cnt = ctx->enable_refcnt;
@@ -1637,7 +1699,7 @@ int msm_ioctl_power_ctrl(struct drm_device *dev, void *data,
 
 	mutex_unlock(&priv->phandle.ext_client_lock);
 
-	pr_debug("pid %d enable %d, refcnt %d, vote_req %d\n",
+	pr_info("pid %d enable %d, refcnt %d, vote_req %d\n",
 			current->pid, power_ctrl->enable, ctx->enable_refcnt,
 			vote_req);
 	SDE_EVT32(current->pid, power_ctrl->enable, ctx->enable_refcnt,
@@ -1687,6 +1749,7 @@ static struct drm_driver msm_driver = {
 				DRIVER_ATOMIC |
 				DRIVER_MODESET,
 	.open               = msm_open,
+	.preclose           = msm_preclose,
 	.postclose          = msm_postclose,
 	.lastclose          = msm_lastclose,
 	.irq_handler        = msm_irq,
@@ -1909,6 +1972,12 @@ static int add_display_components(struct device *dev,
 			node = of_parse_phandle(np, "connectors", i);
 			if (!node)
 				break;
+#ifndef CONFIG_SEC_DISPLAYPORT
+			if (!strncmp(node->name, "qcom,dp_display", 15)) {
+				pr_info("[drm-dp] disabled displayport!\n");
+				continue;
+			}
+#endif
 
 			component_match_add(dev, matchptr, compare_of, node);
 		}
@@ -2028,6 +2097,7 @@ static int msm_pdev_probe(struct platform_device *pdev)
 	int ret;
 	struct component_match *match = NULL;
 
+	reg_log_dump(__func__, __LINE__);
 	ret = add_display_components(&pdev->dev, &match);
 	if (ret)
 		return ret;

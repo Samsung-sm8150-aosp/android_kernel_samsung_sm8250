@@ -10,9 +10,6 @@
 #include <ipc/apr.h>
 #include <linux/msm_audio.h>
 
-/* number of threshold levels in speaker protection module */
-#define MAX_CPS_LEVELS 3
-
 /* size of header needed for passing data out of band */
 #define APR_CMD_OB_HDR_SZ  12
 
@@ -2367,28 +2364,6 @@ int16_t        excursionf[AFE_SPKR_PROT_EXCURSIONF_LEN];
  */
 } __packed;
 
-struct lpass_swr_spkr_dep_cfg_t {
-	uint32_t vbatt_pkd_reg_addr;
-	uint32_t temp_pkd_reg_addr;
-	uint32_t value_normal_thrsd[MAX_CPS_LEVELS];
-	uint32_t value_low1_thrsd[MAX_CPS_LEVELS];
-	uint32_t value_low2_thrsd[MAX_CPS_LEVELS];
-} __packed;
-
-struct lpass_swr_hw_reg_cfg_t {
-	uint32_t lpass_wr_cmd_reg_phy_addr;
-	uint32_t lpass_rd_cmd_reg_phy_addr;
-	uint32_t lpass_rd_fifo_reg_phy_addr;
-	uint32_t vbatt_lower1_threshold;
-	uint32_t vbatt_lower2_threshold;
-	uint32_t num_spkr;
-} __packed;
-
-struct afe_cps_hw_intf_cfg {
-	uint32_t lpass_hw_intf_cfg_mode;
-	struct lpass_swr_hw_reg_cfg_t hw_reg_cfg;
-	struct lpass_swr_spkr_dep_cfg_t *spkr_dep_cfg;
-} __packed;
 
 #define AFE_SERVICE_CMD_REGISTER_RT_PORT_DRIVER	0x000100E0
 
@@ -4103,6 +4078,12 @@ struct afe_id_aptx_adaptive_enc_init
 #define AFE_ENCODER_PARAM_ID_PACKETIZER_ID 0x0001322E
 
 /*
+ * MI2S packetizer id for #AVS_MODULE_ID_ENCODER module.
+ * Used when I2S interface is selected.
+ */
+#define AFE_MODULE_ID_PACKETIZER_MI2S 0x1000F101
+
+/*
  * Encoder config block  parameter for the #AVS_MODULE_ID_ENCODER module.
  * This parameter may be set runtime.
  */
@@ -4242,6 +4223,7 @@ struct aptx_channel_mode_param_t {
  * @table{weak__asm__sbc__enc__cfg__t}
  */
 #define ASM_MEDIA_FMT_SBC                         0x00010BF2
+#define ASM_MEDIA_FMT_SBC_SS                      0x00010BF5
 
 /* SBC channel Mono mode.*/
 #define ASM_MEDIA_FMT_SBC_CHANNEL_MODE_MONO                     1
@@ -4320,6 +4302,11 @@ struct asm_sbc_enc_cfg_t {
 	 */
 	uint32_t    sample_rate;
 };
+
+struct asm_ss_sbc_enc_cfg_t {
+	struct asm_sbc_enc_cfg_t custom_config;
+	struct afe_abr_enc_cfg_t abr_config;
+} __packed;
 
 #define ASM_MEDIA_FMT_AAC_AOT_LC            2
 #define ASM_MEDIA_FMT_AAC_AOT_SBR           5
@@ -4562,6 +4549,22 @@ struct asm_ldac_enc_cfg_t {
 	struct afe_abr_enc_cfg_t abr_config;
 } __packed;
 
+/* FMT ID for SSC */
+#define ASM_MEDIA_FMT_SSC 0x00010BF3
+
+struct asm_custom_enc_cfg_ssc_t {
+	uint32_t    sample_rate;
+	/* Mono or stereo */
+	uint16_t    num_channels;
+	uint16_t    reserved;
+	/* num_ch == 1, then PCM_CHANNEL_C,
+	 * num_ch == 2, then {PCM_CHANNEL_L, PCM_CHANNEL_R}
+	 */
+	uint8_t     channel_mapping[8];
+	uint32_t    custom_size;
+	struct afe_abr_enc_cfg_t abr_config;
+} __packed;
+
 struct afe_enc_fmt_id_param_t {
 	/*
 	 * Supported values:
@@ -4751,6 +4754,7 @@ struct asm_aptx_ad_speech_dec_cfg_t {
 
 union afe_enc_config_data {
 	struct asm_sbc_enc_cfg_t sbc_config;
+	struct asm_ss_sbc_enc_cfg_t ss_sbc_config;
 	struct asm_aac_enc_cfg_t aac_config;
 	struct asm_custom_enc_cfg_t  custom_config;
 	struct asm_celt_enc_cfg_t  celt_config;
@@ -4758,12 +4762,15 @@ union afe_enc_config_data {
 	struct asm_ldac_enc_cfg_t  ldac_config;
 	struct asm_aptx_ad_enc_cfg_t  aptx_ad_config;
 	struct asm_aptx_ad_speech_enc_cfg_t aptx_ad_speech_config;
+	struct asm_custom_enc_cfg_ssc_t ssc_config;
 };
 
 struct afe_enc_config {
 	u32 format;
 	u32 scrambler_mode;
 	u32 mono_mode;
+	u16 mtu;
+	u16 a2dp_suspend;
 	union afe_enc_config_data data;
 };
 
@@ -4854,6 +4861,47 @@ struct afe_enc_aptx_ad_speech_cfg_blk_param_t {
 struct afe_dec_media_fmt_t {
 	union afe_dec_config_data dec_media_config;
 } __packed;
+
+#define AVS_PARAM_ID_PEER_MTU_ID 0x0001F101
+#define AVS_PARAM_ID_A2DP_SUSPEND_ID 0x0001F107
+#define AVS_ENCODER_PARAM_ID_ENC_BITRATE 0x0001322D
+#define AVS_PARAM_ID_ENC_FORMAT_ID 0x0001F105
+
+/*
+ * Payload of the AVS_PARAM_ID_DYNAMIC_BITPOOL_ID parameter.
+ */
+struct avs_enc_mtu_param_t {
+	/*
+	 * Supported values:
+	 * #AVS_MODULE_ID_PACKETIZER_COP
+	 * Any OpenDSP supported values
+	 */
+	uint32_t mtu;
+};
+
+/*
+ * Payload of the AVS_PARAM_ID_A2DP_SUSPEND_ID parameter.
+ */
+struct avs_enc_a2dp_suspend_param_t {
+	/*
+	 * Supported values:
+	 * #AVS_MODULE_ID_PACKETIZER_COP
+	 * Any OpenDSP supported values
+	 */
+	uint32_t a2dp_suspend;
+};
+
+/*
+ * Payload of the AVS_PARAM_ID_ENC_FORMAT_ID parameter.
+ */
+struct avs_enc_format_param_t {
+	/*
+	 * Supported values:
+	 * #AVS_MODULE_ID_PACKETIZER_COP
+	 * Any OpenDSP supported values
+	 */
+	uint32_t enc_format;
+};
 
 /*
  * Payload of the AVS_ENCODER_PARAM_ID_PACKETIZER_ID parameter.
@@ -6223,6 +6271,22 @@ struct asm_enc_cfg_blk_param_v2 {
 
 } __packed;
 
+struct asm_bitrate_param_t {
+	u32                  enc_bitrate;
+} __packed;
+
+struct asm_mtu_param_t {
+	u32                  mtu;
+} __packed;
+
+struct asm_a2dp_suspend_param_t {
+	u32                  a2dp_suspend;
+} __packed;
+
+struct asm_enc_format_param_t {
+	u32                  enc_format;
+} __packed;
+
 struct asm_custom_enc_cfg_t_v2 {
 	struct apr_hdr hdr;
 	struct asm_stream_cmd_set_encdec_param encdec;
@@ -6625,6 +6689,13 @@ struct asm_aac_enc_cfg_v2 {
  * The sampling rate must not change during encoding.
  */
 
+} __packed;
+
+struct asm_dyn_bitpool_cfg_v2 {
+	struct apr_hdr hdr;
+	struct afe_port_cmd_set_param_v2 param;
+	struct param_hdr_v1 pdata;
+	struct asm_bitrate_param_t dyn_bitpool;
 } __packed;
 
 #define ASM_MEDIA_FMT_G711_ALAW_FS 0x00010BF7
@@ -10809,7 +10880,6 @@ struct cmd_set_topologies {
 #define AFE_PARAM_ID_FBSP_MODE_RX_CFG 0x0001021D
 #define AFE_PARAM_ID_FBSP_PTONE_RAMP_CFG 0x00010260
 #define AFE_PARAM_ID_SP_RX_TMAX_XMAX_LOGGING 0x000102BC
-#define AFE_PARAM_ID_CPS_LPASS_HW_INTF_CFG 0x000102EF
 
 struct asm_fbsp_mode_rx_cfg {
 	uint32_t minor_version;

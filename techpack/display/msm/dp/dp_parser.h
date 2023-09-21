@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
- * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
  */
 
 #ifndef _DP_PARSER_H_
@@ -176,6 +175,24 @@ static inline char *dp_phy_aux_config_type_to_string(u32 cfg_type)
 	}
 }
 
+#ifdef CONFIG_SEC_DISPLAYPORT
+enum secdp_phy_pre_emphasis_type {
+	PHY_PRE_EMP0,		/* 0   db */
+	PHY_PRE_EMP1,		/* 3.5 db */
+	PHY_PRE_EMP2,		/* 6.0 db */
+	PHY_PRE_EMP3,		/* 9.5 db */
+	MAX_PRE_EMP_LEVELS,
+};
+
+enum secdp_phy_voltage_type {
+	PHY_VOLTAGE_SWING0,	/* 0.4 v */
+	PHY_VOLTAGE_SWING1,	/* 0.6 v */
+	PHY_VOLTAGE_SWING2,	/* 0.8 v */
+	PHY_VOLTAGE_SWING3,	/* 1.2 v, optional */
+	MAX_VOLTAGE_LEVELS,
+};
+#endif
+
 /**
  * struct dp_parser - DP parser's data exposed to clients
  *
@@ -187,8 +204,6 @@ static inline char *dp_phy_aux_config_type_to_string(u32 cfg_type)
  * @l_pnswap: P/N swap status on each lane
  * @max_pclk_khz: maximum pixel clock supported for the platform
  * @max_lclk_khz: maximum link clock supported for the platform
- * @max_hdisplay: maximum supported horizontal display by the platform for dp
- * @max_vdisplay: maximum supported vertical display by the platform for dp
  * @hw_cfg: DP HW specific settings
  * @has_mst: MST feature enable status
  * @has_mst_sideband: MST sideband feature enable status
@@ -200,8 +215,7 @@ static inline char *dp_phy_aux_config_type_to_string(u32 cfg_type)
  * @max_dp_dsc_blks: maximum DSC blks for DP interface
  * @max_dp_dsc_input_width_pixs: Maximum input width for DSC block
  * @has_widebus: widebus (2PPC) feature eanble status
-  *@mst_fixed_port: mst port_num reserved for fixed topology
- * @display_type: display type as defined in device tree.
+ * @mst_fixed_port: mst port_num reserved for fixed topology
  * @parse: function to be called by client to parse device tree.
  * @get_io: function to be called by client to get io data.
  * @get_io_buf: function to be called by client to get io buffers.
@@ -220,8 +234,6 @@ struct dp_parser {
 	struct dp_aux_cfg aux_cfg[AUX_CFG_LEN];
 	u32 max_pclk_khz;
 	u32 max_lclk_khz;
-	u32 max_hdisplay;
-	u32 max_vdisplay;
 	struct dp_hw_cfg hw_cfg;
 	bool has_mst;
 	bool has_mst_sideband;
@@ -236,7 +248,20 @@ struct dp_parser {
 	bool lphw_hpd;
 	u32 mst_fixed_port[MAX_DP_MST_STREAMS];
 
-	const char *display_type;
+#ifdef CONFIG_SEC_DISPLAYPORT
+	bool cc_dir_inv;  /* CC_DIR is inversed, e.g, T865 */
+	bool aux_sel_inv; /* inverse control of AUX_SEL e.g, D2Xq hwid 01,02 */
+	int  use_redrv;   /* ptn36502 needs NOT AUX switch SEL control */
+	int  dex_dft_res; /* DeX default resolution, e.g, HG950 */
+	bool prefer_support;  /* true if prefer resolution has high priority */
+
+	u8 vm_pre_emphasis[MAX_VOLTAGE_LEVELS][MAX_PRE_EMP_LEVELS];
+	u8 vm_voltage_swing[MAX_VOLTAGE_LEVELS][MAX_PRE_EMP_LEVELS];
+	u8 dp_pre_emp_hbr2_hbr3[MAX_VOLTAGE_LEVELS][MAX_PRE_EMP_LEVELS];
+	u8 dp_swing_hbr2_hbr3[MAX_VOLTAGE_LEVELS][MAX_PRE_EMP_LEVELS];
+	u8 dp_pre_emp_hbr_rbr[MAX_VOLTAGE_LEVELS][MAX_PRE_EMP_LEVELS];
+	u8 dp_swing_hbr_rbr[MAX_VOLTAGE_LEVELS][MAX_PRE_EMP_LEVELS];
+#endif
 
 	int (*parse)(struct dp_parser *parser);
 	struct dp_io_data *(*get_io)(struct dp_parser *parser, char *name);
