@@ -37,7 +37,7 @@
  * @retval time
  **/
 
-long long int get_time()
+long long int get_time(void)
 {
 	struct timeval now;
 

@@ -55,7 +55,7 @@ static void	start_daemon_mode(void);
 
 pthread_t event_tid;
 pthread_mutex_t input_lock;
-void usage()
+void usage(void)
 {
 	printf("Usage: tmon [OPTION...]\n");
 	printf("  -c, --control         cooling device in control\n");
@@ -71,7 +71,7 @@ void usage()
 	exit(0);
 }
 
-void version()
+void version(void)
 {
 	printf("TMON version %s\n", VERSION);
 	exit(EXIT_SUCCESS);
@@ -349,7 +349,7 @@ int main(int argc, char **argv)
 	return 0;
 }
 
-static void start_daemon_mode()
+static void start_daemon_mode(void)
 {
 	daemon_mode = 1;
 	/* fork */

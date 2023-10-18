@@ -483,7 +483,7 @@ int zone_instance_to_index(int zone_inst)
 }
 
 /* read temperature of all thermal zones */
-int update_thermal_data()
+int update_thermal_data(void)
 {
 	int i;
 	int next_thermal_record = cur_thermal_record + 1;

@@ -25,17 +25,17 @@ void *get_buf(unsigned *lenp, void **bufp)
 	return "Buffer";
 }
 
-bool used_empty()
+bool used_empty(void)
 {
 	return false;
 }
 
-void disable_call()
+void disable_call(void)
 {
 	assert(0);
 }
 
-bool enable_call()
+bool enable_call(void)
 {
 	assert(0);
 }
@@ -46,17 +46,17 @@ void kick_available(void)
 }
 
 /* host side */
-void disable_kick()
+void disable_kick(void)
 {
 	assert(0);
 }
 
-bool enable_kick()
+bool enable_kick(void)
 {
 	assert(0);
 }
 
-bool avail_empty()
+bool avail_empty(void)
 {
 	return false;
 }

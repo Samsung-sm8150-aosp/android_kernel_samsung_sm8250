@@ -57,7 +57,7 @@ static int call_user_prg( char **argv, int wait )
 	}		
 }
 
-int get_qdaf_failed_cnt()
+int get_qdaf_failed_cnt(void)
 {
 	int ret_userapp, wait_val=0;
 	char *argv[4] = { NULL, NULL, NULL, NULL };

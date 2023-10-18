@@ -2668,7 +2668,7 @@ failure:
 	return result;
 }
 
-static char *setup_mount_dir()
+static char *setup_mount_dir(void)
 {
 	struct stat st;
 	char *current_dir = getcwd(NULL, 0);

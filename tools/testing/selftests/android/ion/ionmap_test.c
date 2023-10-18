@@ -81,7 +81,7 @@ void close_handle(int vgem_fd, uint32_t handle)
 	ioctl(vgem_fd, DRM_IOCTL_GEM_CLOSE, &close);
 }
 
-int main()
+int main(void)
 {
 	int ret, vgem_fd;
 	struct ion_buffer_info info;

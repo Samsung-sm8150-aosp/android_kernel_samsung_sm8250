@@ -942,7 +942,7 @@ out:
 	return err;
 }
 
-static void test_stacktrace_map()
+static void test_stacktrace_map(void)
 {
 	int control_map_fd, stackid_hmap_fd, stackmap_fd, stack_amap_fd;
 	const char *file = "./test_stacktrace_map.o";
@@ -1043,7 +1043,7 @@ close_prog:
 	bpf_object__close(obj);
 }
 
-static void test_stacktrace_map_raw_tp()
+static void test_stacktrace_map_raw_tp(void)
 {
 	int control_map_fd, stackid_hmap_fd, stackmap_fd;
 	const char *file = "./test_stacktrace_map.o";

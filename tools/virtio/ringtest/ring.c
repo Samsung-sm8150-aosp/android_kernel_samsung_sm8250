@@ -161,21 +161,21 @@ void *get_buf(unsigned *lenp, void **bufp)
 	return datap;
 }
 
-bool used_empty()
+bool used_empty(void)
 {
 	unsigned head = (ring_size - 1) & guest.last_used_idx;
 
 	return (ring[head].flags & DESC_HW);
 }
 
-void disable_call()
+void disable_call(void)
 {
 	/* Doing nothing to disable calls might cause
 	 * extra interrupts, but reduces the number of cache misses.
 	 */
 }
 
-bool enable_call()
+bool enable_call(void)
 {
 	event->call_index = guest.last_used_idx;
 	/* Flush call index write */
@@ -201,14 +201,14 @@ void kick_available(void)
 }
 
 /* host side */
-void disable_kick()
+void disable_kick(void)
 {
 	/* Doing nothing to disable kicks might cause
 	 * extra interrupts, but reduces the number of cache misses.
 	 */
 }
 
-bool enable_kick()
+bool enable_kick(void)
 {
 	event->kick_index = host.used_idx;
 	/* Barrier C (for pairing) */
@@ -216,7 +216,7 @@ bool enable_kick()
 	return avail_empty();
 }
 
-bool avail_empty()
+bool avail_empty(void)
 {
 	unsigned head = (ring_size - 1) & host.used_idx;
 

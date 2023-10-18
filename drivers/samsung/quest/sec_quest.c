@@ -257,7 +257,7 @@ static int call_user_prg( char **argv, int wait )
 	}
 }
 
-static int do_quest()
+static int do_quest(void)
 {
 	char *argv[6] = { NULL, NULL, NULL, NULL, NULL, NULL };
 	int ret;
@@ -452,7 +452,7 @@ static int get_smd_subitem_result_string(char *buf, int piece)
 }
 
 #if defined(CONFIG_SEC_QUEST_HLOS_DUMMY_SMD)
-static void check_and_update_qdaf_result()
+static void check_and_update_qdaf_result(void)
 {
 	int qdaf_failed_cnt;
 
@@ -492,7 +492,7 @@ static void run_qdaf_in_background(enum quest_qdaf_action_t action)
 //////////////////////////////////////////////////
 /////// initializer functions //////////////////////////
 //////////////////////////////////////////////////
-static void make_debugging_files()
+static void make_debugging_files(void)
 {
 #if defined(CONFIG_ARM) || defined(CONFIG_ARM64)
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5,4,0)
@@ -521,7 +521,7 @@ static void make_debugging_files()
 }
 
 // TODO
-static void check_abnormal_param()
+static void check_abnormal_param(void)
 {
 	// The abnormal param have been checked by quest_check_abnormal_param_quest_data() at quest_setup.c of XBL
 	// If we want to check it at kernel, please use this function
@@ -533,7 +533,7 @@ static void check_abnormal_param()
 
 // initialize step for smd, cal and main
 // move uefi log to output_log_path
-static void setup_scenario()
+static void setup_scenario(void)
 {
 	switch (param_quest_data.curr_step) {
 	case STEP_SMDDL: {
@@ -692,7 +692,7 @@ static void setup_scenario()
 
 
 static int initialized = 0;
-static void __initialize()
+static void __initialize(void)
 {
 	if( likely(initialized) ) return;
 	initialized = 1;

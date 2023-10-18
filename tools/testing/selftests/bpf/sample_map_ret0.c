@@ -17,7 +17,7 @@ struct bpf_map_def SEC("maps") array = {
 };
 
 /* Sample program which should always load for testing control paths. */
-SEC(".text") int func()
+SEC(".text") int func(void)
 {
 	__u64 key64 = 0;
 	__u32 key = 0;

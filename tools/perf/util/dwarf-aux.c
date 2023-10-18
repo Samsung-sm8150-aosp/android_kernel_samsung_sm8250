@@ -1290,7 +1290,7 @@ static bool die_get_postprologue_addr(unsigned long entrypc_idx,
 		/*
 		 * Single source line can have multiple line records.
 		 * For Example,
-		 *     void foo() { printf("hello\n"); }
+		 *     void foo(void) { printf("hello\n"); }
 		 * contains two line records. One points to declaration and
 		 * other points to printf() line. Variable 'lno' won't get
 		 * incremented in this case but 'i' will.

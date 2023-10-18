@@ -578,9 +578,9 @@ acpi_fwnode_get_named_child_node(const struct fwnode_handle *fwnode,
  * It is possible to leave holes in the property value set like in the
  * example below:
  *
- * Package () {
+ * Package (void) {
  *     "cs-gpios",
- *     Package () {
+ *     Package (void) {
  *        ^GPIO, 19, 0, 0,
  *        ^GPIO, 20, 0, 0,
  *        0,
@@ -633,7 +633,7 @@ int __acpi_node_get_property_reference(const struct fwnode_handle *fwnode,
 	 * If it is not a single reference, then it is a package of
 	 * references followed by number of ints as follows:
 	 *
-	 *  Package () { REF, INT, REF, INT, INT }
+	 *  Package (void) { REF, INT, REF, INT, INT }
 	 *
 	 * The index argument is then used to determine which reference
 	 * the caller wants (along with the arguments).

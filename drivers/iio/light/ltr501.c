@@ -574,7 +574,7 @@ static const struct iio_event_spec ltr501_pxs_event_spec[] = {
 	.num_event_specs = _evsize,\
 }
 
-#define LTR501_LIGHT_CHANNEL() { \
+#define LTR501_LIGHT_CHANNEL(void) { \
 	.type = IIO_LIGHT, \
 	.info_mask_separate = BIT(IIO_CHAN_INFO_PROCESSED), \
 	.scan_index = -1, \

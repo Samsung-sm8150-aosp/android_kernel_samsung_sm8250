@@ -12887,7 +12887,7 @@ out:
 	return ret;
 }
 
-static void get_unpriv_disabled()
+static void get_unpriv_disabled(void)
 {
 	char buf[2];
 	FILE *fd;

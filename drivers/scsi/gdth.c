@@ -205,7 +205,7 @@ static char strbuf[MAX_SERBUF+1];
 #else
 #define COM_BASE 0x3f8
 #endif
-static void ser_init()
+static void ser_init(void)
 {
     unsigned port=COM_BASE;
 

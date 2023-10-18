@@ -150,7 +150,7 @@ static inline void setr(int type, struct rlimit *rlim)
 		shutdown(7, "setrlimit()", __LINE__ - 1);
 }
 
-void validate_current_settings()
+void validate_current_settings(void)
 {
 	int rlim_needed;
 

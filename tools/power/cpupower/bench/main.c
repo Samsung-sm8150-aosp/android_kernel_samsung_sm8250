@@ -49,7 +49,7 @@ static struct option long_options[] = {
  usage
 *******************************************************************/
 
-void usage()
+void usage(void)
 {
 	printf("usage: ./bench\n");
 	printf("Options:\n");
